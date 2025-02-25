@@ -6,7 +6,7 @@ import (
 
 	"calculator-sprint-2/internal/agent"
 	"calculator-sprint-2/internal/handlers"
-	"calc_service/internal/orchestrator"
+	"calculator-sprint-2/internal/orchestrator"
 )
 
 func main() {
