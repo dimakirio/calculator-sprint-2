@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"calculator-sprint-2/internal/agent"
-	"calc_service/internal/handlers"
+	"calculator-sprint-2/internal/handlers"
 	"calc_service/internal/orchestrator"
 )
 
