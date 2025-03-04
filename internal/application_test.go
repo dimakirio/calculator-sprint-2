@@ -1,142 +1,86 @@
-package application
+package application_test
 
 import (
-	"fmt"
-	"strconv"
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
-	"unicode"
+	"testing"
+
+	"github.com/Andreyka-coder9192/calc_go/internal/application"
 )
 
-type ASTNode struct {
-	IsLeaf        bool
-	Value         float64
-	Operator      string
-	Left, Right   *ASTNode
-	TaskScheduled bool
+func sanitizeJSON(s string) string {
+	return strings.Join(strings.Fields(s), "")
 }
 
-func ParseAST(expression string) (*ASTNode, error) {
-	expr := strings.ReplaceAll(expression, " ", "")
-	if expr == "" {
-		return nil, fmt.Errorf("empty expression")
+func TestCalcHandler(t *testing.T) {
+	tests := []struct {
+		name             string
+		method           string
+		body             interface{}
+		expectedStatus   int
+		expectedResponse string
+	}{
+		{
+			name:             "Valid Expression",
+			method:           http.MethodPost,
+			body:             map[string]string{"expression": "2 + 2"},
+			expectedStatus:   http.StatusOK,
+			expectedResponse: `{"result":"4"}`,
+		},
+		{
+			name:             "Wrong Method",
+			method:           http.MethodGet,
+			body:             nil,
+			expectedStatus:   http.StatusMethodNotAllowed,
+			expectedResponse: `{"error":"Wrong Method"}`,
+		},
+		{
+			name:             "Invalid Body",
+			method:           http.MethodPost,
+			body:             "invalid body",
+			expectedStatus:   http.StatusBadRequest,
+			expectedResponse: `{"error":"Invalid Body"}`,
+		},
+		{
+			name:             "Error Calculation - Invalid Expression",
+			method:           http.MethodPost,
+			body:             map[string]string{"expression": "2(2+2{)"},
+			expectedStatus:   http.StatusUnprocessableEntity,
+			expectedResponse: `{"error":"Error calculation"}`,
+		},
 	}
-	p := &parser{input: expr, pos: 0}
-	node, err := p.parseExpression()
-	if err != nil {
-		return nil, err
-	}
-	if p.pos < len(p.input) {
-		return nil, fmt.Errorf("unexpected token at position %d", p.pos)
-	}
-	return node, nil
-}
 
-type parser struct {
-	input string
-	pos   int
-}
-
-func (p *parser) peek() rune {
-	if p.pos < len(p.input) {
-		return rune(p.input[p.pos])
-	}
-	return 0
-}
-
-func (p *parser) get() rune {
-	ch := p.peek()
-	p.pos++
-	return ch
-}
-
-func (p *parser) parseExpression() (*ASTNode, error) {
-	node, err := p.parseTerm()
-	if err != nil {
-		return nil, err
-	}
-	for {
-		ch := p.peek()
-		if ch == '+' || ch == '-' {
-			op := string(p.get())
-			right, err := p.parseTerm()
-			if err != nil {
-				return nil, err
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requestBody []byte
+			if tt.body != nil {
+				var err error
+				requestBody, err = json.Marshal(tt.body)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
-			node = &ASTNode{
-				IsLeaf:   false,
-				Operator: op,
-				Left:     node,
-				Right:    right,
-			}
-		} else {
-			break
-		}
-	}
-	return node, nil
-}
 
-func (p *parser) parseTerm() (*ASTNode, error) {
-	node, err := p.parseFactor()
-	if err != nil {
-		return nil, err
-	}
-	for {
-		ch := p.peek()
-		if ch == '*' || ch == '/' {
-			op := string(p.get())
-			right, err := p.parseFactor()
-			if err != nil {
-				return nil, err
-			}
-			node = &ASTNode{
-				IsLeaf:   false,
-				Operator: op,
-				Left:     node,
-				Right:    right,
-			}
-		} else {
-			break
-		}
-	}
-	return node, nil
-}
+			reqPath := "/api/v1/calculate"
 
-func (p *parser) parseFactor() (*ASTNode, error) {
-	ch := p.peek()
-	if ch == '(' {
-		p.get()
-		node, err := p.parseExpression()
-		if err != nil {
-			return nil, err
-		}
-		if p.peek() != ')' {
-			return nil, fmt.Errorf("missing closing parenthesis")
-		}
-		p.get()
-		return node, nil
+			req := httptest.NewRequest(tt.method, reqPath, bytes.NewBuffer(requestBody))
+			rr := httptest.NewRecorder()
+			handler := http.HandlerFunc(application.CalcHandler)
+
+			handler.ServeHTTP(rr, req)
+
+			if status := rr.Code; status != tt.expectedStatus {
+				t.Errorf("Handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
+			}
+
+			if tt.expectedResponse != "" {
+				if sanitizedBody := sanitizeJSON(rr.Body.String()); sanitizedBody != sanitizeJSON(tt.expectedResponse) {
+					t.Errorf("Handler returned unexpected response body: got '%v' want '%v'", rr.Body.String(), tt.expectedResponse)
+				}
+			}
+		})
 	}
-	start := p.pos
-	if ch == '+' || ch == '-' {
-		p.get()
-	}
-	for {
-		ch = p.peek()
-		if unicode.IsDigit(ch) || ch == '.' {
-			p.get()
-		} else {
-			break
-		}
-	}
-	token := p.input[start:p.pos]
-	if token == "" {
-		return nil, fmt.Errorf("expected number at position %d", start)
-	}
-	value, err := strconv.ParseFloat(token, 64)
-	if err != nil {
-		return nil, fmt.Errorf("invalid number %s", token)
-	}
-	return &ASTNode{
-		IsLeaf: true,
-		Value:  value,
-	}, nil
 }
