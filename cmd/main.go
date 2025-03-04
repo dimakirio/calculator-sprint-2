@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/Andreyka-coder9192/calc_go/internal/application"
+	"github.com/dimakirio/calculator-sprint-2/internal"
 )
 
 func main() {
