@@ -1,13 +1,14 @@
 package main
 
 import (
-	"log"
+	"fmt"
 
-	"github.com/dimakirio/calculator-sprint-2/internal/application"
+	"github.com/Andreyka-coder9192/calc_go/internal/application"
 )
 
 func main() {
-	agent := application.NewAgent()
-	log.Println("Starting Agent...")
-	agent.Run()
+	app := application.New()
+	fmt.Println("RunServer")
+	// app.Run()
+	app.RunServer()
 }
