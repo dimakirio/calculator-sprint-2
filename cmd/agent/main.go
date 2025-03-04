@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"github.com/dimakirio/calculator-sprint-2/internal/application"
+	"github.com/dimakirio/calculator-sprint-2/internal"
 )
 
 func main() {
