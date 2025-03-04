@@ -1,147 +1,99 @@
 package application
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
-	"strings"
+	"strconv"
+	"time"
 
 	"github.com/dimakirio/calculator-sprint-2/pkg"
 )
 
-type Config struct {
-	Addr string
+type Agent struct {
+	ComputingPower  int
+	OrchestratorURL string
 }
 
-func ConfigFromEnv() *Config {
-	config := new(Config)
-	config.Addr = os.Getenv("PORT")
-	if config.Addr == "" {
-		config.Addr = "8080"
+func NewAgent() *Agent {
+	cp, err := strconv.Atoi(os.Getenv("COMPUTING_POWER"))
+	if err != nil || cp < 1 {
+		cp = 1
 	}
-	return config
-}
-
-type Application struct {
-	config *Config
-}
-
-func New() *Application {
-	return &Application{
-		config: ConfigFromEnv(),
+	orchestratorURL := os.Getenv("ORCHESTRATOR_URL")
+	if orchestratorURL == "" {
+		orchestratorURL = "http://localhost:8080"
+	}
+	return &Agent{
+		ComputingPower:  cp,
+		OrchestratorURL: orchestratorURL,
 	}
 }
 
-func CalcHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, `{"error":"Wrong Method"}`, http.StatusMethodNotAllowed)
-		return
+func (a *Agent) Run() {
+	for i := 0; i < a.ComputingPower; i++ {
+		log.Printf("Starting worker %d", i)
+		go a.worker(i)
 	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, `{"error":"Invalid Body"}`, http.StatusBadRequest)
-		return
-	}
-	defer r.Body.Close()
-
-	var request struct {
-		Expression string `json:"expression"`
-	}
-	err = json.Unmarshal(body, &request)
-	if err != nil || request.Expression == "" {
-		http.Error(w, `{"error":"Invalid Body"}`, http.StatusBadRequest)
-		return
-	}
-
-	result, err := calculation.Calc(request.Expression)
-	if err != nil {
-		var errorMsg string
-		statusCode := http.StatusUnprocessableEntity
-
-		switch err {
-		case calculation.ErrInvalidExpression:
-			errorMsg = "Error calculation"
-		case calculation.ErrDivisionByZero:
-			errorMsg = "Division by zero"
-		case calculation.ErrMismatchedParentheses:
-			errorMsg = "Mismatched parentheses"
-		case calculation.ErrInvalidNumber:
-			errorMsg = "Invalid number"
-		case calculation.ErrUnexpectedToken:
-			errorMsg = "Unexpected token"
-		case calculation.ErrNotEnoughValues:
-			errorMsg = "Not enough values"
-		case calculation.ErrInvalidOperator:
-			errorMsg = "Invalid operator"
-		case calculation.ErrOperatorAtEnd:
-			errorMsg = "Operator at end"
-		case calculation.ErrMultipleDecimalPoints:
-			errorMsg = "Multiple decimal points"
-		case calculation.ErrEmptyInput:
-			errorMsg = "Empty input"
-		default:
-			errorMsg = "Error calculation"
-			statusCode = http.StatusUnprocessableEntity
-		}
-
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, errorMsg), statusCode)
-		return
-	}
-
-	response := struct {
-		Result string `json:"result"`
-	}{
-		Result: fmt.Sprintf("%v", result),
-	}
-
-	responseJson, err := json.Marshal(response)
-	if err != nil {
-		log.Printf("Error while marshaling response: %v", err)
-		http.Error(w, `{"error":"Unknown error occurred"}`, http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, err = w.Write(responseJson)
-	if err != nil {
-		log.Printf("Error writing response: %v", err)
-	}
+	select {}
 }
 
-func (a *Application) Run() error {
+func (a *Agent) worker(id int) {
 	for {
-		log.Println("input expression")
-		reader := bufio.NewReader(os.Stdin)
-		text, err := reader.ReadString('\n')
+		resp, err := http.Get(a.OrchestratorURL + "/internal/task")
 		if err != nil {
-			log.Println("failed to read expression from console")
+			log.Printf("Worker %d: error getting task: %v", id, err)
+			time.Sleep(2 * time.Second)
+			continue
 		}
-		text = strings.TrimSpace(text)
-		if text == "exit" {
-			log.Println("application was successfully closed")
-			return nil
+		if resp.StatusCode == http.StatusNotFound {
+			resp.Body.Close()
+			time.Sleep(1 * time.Second)
+			continue
 		}
-		result, err := calculation.Calc(text)
+		var taskResp struct {
+			Task struct {
+				ID            string  `json:"id"`
+				Arg1          float64 `json:"arg1"`
+				Arg2          float64 `json:"arg2"`
+				Operation     string  `json:"operation"`
+				OperationTime int     `json:"operation_time"`
+			} `json:"task"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&taskResp)
+		resp.Body.Close()
 		if err != nil {
-			log.Println(text, "calculation failed with error:", err)
+			log.Printf("Worker %d: error decoding task: %v", id, err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		task := taskResp.Task
+		log.Printf("Worker %d: received task %s: %f %s %f, simulating %d ms", id, task.ID, task.Arg1, task.Operation, task.Arg2, task.OperationTime)
+		time.Sleep(time.Duration(task.OperationTime) * time.Millisecond)
+		result, err := calculation.Compute(task.Operation, task.Arg1, task.Arg2)
+		if err != nil {
+			log.Printf("Worker %d: error computing task %s: %v", id, task.ID, err)
+			continue
+		}
+		resultPayload := map[string]interface{}{
+			"id":     task.ID,
+			"result": result,
+		}
+		payloadBytes, _ := json.Marshal(resultPayload)
+		respPost, err := http.Post(a.OrchestratorURL+"/internal/task", "application/json", bytes.NewReader(payloadBytes))
+		if err != nil {
+			log.Printf("Worker %d: error posting result for task %s: %v", id, task.ID, err)
+			continue
+		}
+		if respPost.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(respPost.Body)
+			log.Printf("Worker %d: error response posting result for task %s: %s", id, task.ID, string(body))
 		} else {
-			log.Println(text, "=", result)
+			log.Printf("Worker %d: successfully completed task %s with result %f", id, task.ID, result)
 		}
+		respPost.Body.Close()
 	}
-}
-
-func (a *Application) RunServer() error {
-	http.HandleFunc("/api/v1/calculate", CalcHandler)
-
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, `{"error":"Not Found"}`, http.StatusNotFound)
-	})
-
-	return http.ListenAndServe(":"+a.config.Addr, nil)
 }
