@@ -5,6 +5,7 @@
 Склонируйте репозиторий:
 git clone https://github.com/Andreyka-coder9192/calc_go.git
 cd calc_go
+
 Убедитесь, что Go установлен и находится в $PATH (проверить версию можно командой go version).
 
 Запустите API-сервер:
