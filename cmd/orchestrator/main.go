@@ -1,14 +1,15 @@
 package main
 
 import (
-	"fmt"
+	"log"
 
-	"github.com/dimakirio/calculator-sprint-2/internal"
+	"github.com/Andreyka-coder9192/calc_go/internal/application"
 )
 
 func main() {
-	app := application.New()
-	fmt.Println("RunServer")
-	// app.Run()
-	app.RunServer()
+	app := application.NewOrchestrator()
+	log.Println("Starting Orchestrator on port", app.Config.Addr)
+	if err := app.RunServer(); err != nil {
+		log.Fatal(err)
+	}
 }
