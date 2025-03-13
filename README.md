@@ -6,7 +6,7 @@
 
 1. **Клонируйте репозиторий**:
     ```bash
-    git clone https://github.com/Andreyka-coder9192/calc_go.git
+    git clone https://github.com/dimakirio/calculator-sprint-2.git
     cd calc_go
     ```
 
